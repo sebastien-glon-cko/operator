@@ -346,7 +346,7 @@ func TestRuleRebalance(t *testing.T) {
 	ctx := context.Background()
 
 	origLimit := config.MustGetBaseConfig().ConfigDataBudgetBytes
-	config.MustGetBaseConfig().ConfigDataBudgetBytes = 90
+	config.MustGetBaseConfig().ConfigDataBudgetBytes = 93
 	defer func() { config.MustGetBaseConfig().ConfigDataBudgetBytes = origLimit }()
 
 	mkRule := func(ns, name, recordName string) *vmv1beta1.VMRule {
