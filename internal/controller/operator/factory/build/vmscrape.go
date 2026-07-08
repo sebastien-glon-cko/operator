@@ -23,24 +23,48 @@ type podScrapeBuilder interface {
 	AsOwner() metav1.OwnerReference
 }
 
+// primaryPortNamer is implemented by CRDs supporting multiple HTTPListeners,
+// returning the Service port name generated for the primary listener.
+type primaryPortNamer interface {
+	PrimaryPortName() string
+}
+
+// listenerLookup is implemented by CRDs supporting multiple HTTPListeners.
+type listenerLookup interface {
+	GetListener(name string) *vmv1beta1.HTTPListener
+}
+
 // VMServiceScrape creates corresponding object with `http` port endpoint obtained from given service
 // add additionalPortNames to the monitoring if needed
 func VMServiceScrape(service *corev1.Service, b scrapeBuilder, additionalPortNames ...string) *vmv1beta1.VMServiceScrape {
 	var endpoints []vmv1beta1.Endpoint
 
 	extraArgs := b.GetExtraArgs()
-	authKey := extraArgs["metricsAuthKey"]
+	authKey := extraArgs[vmv1beta1.MetricsAuthKeyFlag]
 
-	const defaultPortName = "http"
+	defaultPortName := "http"
+	if pn, ok := b.(primaryPortNamer); ok {
+		defaultPortName = pn.PrimaryPortName()
+	}
+	ll, hasListeners := b.(listenerLookup)
+
 	for _, servicePort := range service.Spec.Ports {
+		var listener *vmv1beta1.HTTPListener
+		if hasListeners {
+			listener = ll.GetListener(servicePort.Name)
+		}
+		if listener != nil && ptr.Deref(listener.UseProxyProtocol, false) {
+			continue
+		}
+
 		// fast path - filter all unmatched ports
-		if servicePort.Name != defaultPortName && len(additionalPortNames) == 0 {
+		if servicePort.Name != defaultPortName && listener == nil && len(additionalPortNames) == 0 {
 			continue
 		}
 
 		var extraRelabelingRules vmv1beta1.EndpointRelabelings
 		path := b.GetMetricsPath()
-		if servicePort.Name != defaultPortName {
+		if servicePort.Name != defaultPortName && listener == nil {
 			// check service for extra ports
 			var nameMatched bool
 			for _, filter := range additionalPortNames {
@@ -73,7 +97,11 @@ func VMServiceScrape(service *corev1.Service, b scrapeBuilder, additionalPortNam
 				Path: path,
 			},
 		}
-		if b.UseTLS() {
+		useTLS := b.UseTLS()
+		if listener != nil {
+			useTLS = listener.UseTLS(vmv1beta1.UseTLS(extraArgs))
+		}
+		if useTLS {
 			endpoint.Scheme = "https"
 			// add insecure by default
 			// if needed user will override it with direct config
@@ -138,13 +166,19 @@ func VMServiceScrape(service *corev1.Service, b scrapeBuilder, additionalPortNam
 	return scrape
 }
 
+// listenersEnumerator is implemented by CRDs supporting multiple HTTPListeners.
+type listenersEnumerator interface {
+	GetListeners() []vmv1beta1.HTTPListener
+}
+
 // VMPodScrape builds a VMPodScrape for given podScrapeBuilder, with portName as the primary
-// endpoint and any additionalPortNames (e.g. sidecar metrics ports) appended alongside it.
+// endpoint (or one endpoint per listener, if b supports multiple) and any additionalPortNames
+// (e.g. sidecar metrics ports) appended alongside it.
 func VMPodScrape(b podScrapeBuilder, portName string, additionalPortNames ...string) *vmv1beta1.VMPodScrape {
 	extraArgs := b.GetExtraArgs()
-	authKey := extraArgs["metricsAuthKey"]
+	authKey := extraArgs[vmv1beta1.MetricsAuthKeyFlag]
 
-	buildEndpoint := func(name string, isPrimary bool) vmv1beta1.PodMetricsEndpoint {
+	buildEndpoint := func(name string, useTLS, isPrimary bool) vmv1beta1.PodMetricsEndpoint {
 		path := b.GetMetricsPath()
 		var relabelings vmv1beta1.EndpointRelabelings
 		if !isPrimary {
@@ -167,7 +201,7 @@ func VMPodScrape(b podScrapeBuilder, portName string, additionalPortNames ...str
 				Path: path,
 			},
 		}
-		if b.UseTLS() {
+		if useTLS {
 			ep.Scheme = "https"
 			// add insecure by default
 			// if needed user will override it with direct config
@@ -183,9 +217,22 @@ func VMPodScrape(b podScrapeBuilder, portName string, additionalPortNames ...str
 		return ep
 	}
 
-	endpoints := []vmv1beta1.PodMetricsEndpoint{buildEndpoint(portName, true)}
+	var endpoints []vmv1beta1.PodMetricsEndpoint
+	if le, ok := b.(listenersEnumerator); ok {
+		useTLS := vmv1beta1.UseTLS(extraArgs)
+		useProxyProtocol := vmv1beta1.UseProxyProtocol(extraArgs)
+		for _, l := range le.GetListeners() {
+			if ptr.Deref(l.UseProxyProtocol, useProxyProtocol) {
+				continue
+			}
+			endpoints = append(endpoints, buildEndpoint(l.Name, l.UseTLS(useTLS), true))
+		}
+	}
+	if len(endpoints) == 0 {
+		endpoints = append(endpoints, buildEndpoint(portName, b.UseTLS(), true))
+	}
 	for _, name := range additionalPortNames {
-		endpoints = append(endpoints, buildEndpoint(name, false))
+		endpoints = append(endpoints, buildEndpoint(name, b.UseTLS(), false))
 	}
 
 	selectorLabels := b.SelectorLabels()

@@ -17,6 +17,7 @@ import (
 
 	vmv1alpha1 "github.com/VictoriaMetrics/operator/api/operator/v1alpha1"
 	vmv1beta1 "github.com/VictoriaMetrics/operator/api/operator/v1beta1"
+	"github.com/VictoriaMetrics/operator/internal/controller/operator/factory/build"
 	"github.com/VictoriaMetrics/operator/internal/controller/operator/factory/k8stools"
 	"github.com/VictoriaMetrics/operator/internal/controller/operator/factory/reconcile"
 )
@@ -30,8 +31,10 @@ func newVMAgent(name, namespace string, owner metav1.OwnerReference) *vmv1beta1.
 			OwnerReferences:   []metav1.OwnerReference{owner},
 		},
 		Spec: vmv1beta1.VMAgentSpec{
-			CommonAppsParams: vmv1beta1.CommonAppsParams{
-				ReplicaCount: ptr.To(int32(1)),
+			StandardAppsParams: vmv1beta1.StandardAppsParams{
+				CommonAppsParams: vmv1beta1.CommonAppsParams{
+					ReplicaCount: ptr.To(int32(1)),
+				},
 			},
 		},
 	}
@@ -49,18 +52,24 @@ func newVMCluster(name, namespace, version string, owner metav1.OwnerReference) 
 		Spec: vmv1beta1.VMClusterSpec{
 			ClusterVersion: version,
 			VMSelect: &vmv1beta1.VMSelect{
-				CommonAppsParams: vmv1beta1.CommonAppsParams{
-					ReplicaCount: ptr.To(int32(1)),
+				StandardAppsParams: vmv1beta1.StandardAppsParams{
+					CommonAppsParams: vmv1beta1.CommonAppsParams{
+						ReplicaCount: ptr.To(int32(1)),
+					},
 				},
 			},
 			VMInsert: &vmv1beta1.VMInsert{
-				CommonAppsParams: vmv1beta1.CommonAppsParams{
-					ReplicaCount: ptr.To(int32(1)),
+				StandardAppsParams: vmv1beta1.StandardAppsParams{
+					CommonAppsParams: vmv1beta1.CommonAppsParams{
+						ReplicaCount: ptr.To(int32(1)),
+					},
 				},
 			},
 			VMStorage: &vmv1beta1.VMStorage{
-				CommonAppsParams: vmv1beta1.CommonAppsParams{
-					ReplicaCount: ptr.To(int32(1)),
+				StandardAppsParams: vmv1beta1.StandardAppsParams{
+					CommonAppsParams: vmv1beta1.CommonAppsParams{
+						ReplicaCount: ptr.To(int32(1)),
+					},
 				},
 			},
 		},
@@ -116,13 +125,19 @@ func beforeEach(o opts) *testData {
 			},
 		},
 	}
+	// mirror the defaulting reconcile always applies before GetRemoteWriteURL is used
+	scheme := k8stools.GetTestClientWithObjectsAndInterceptors(nil, interceptor.Funcs{}).Scheme()
+	build.AddDefaults(scheme)
+
 	var predefinedObjects []runtime.Object
 	var vmclusters []*vmv1beta1.VMCluster
 	owner := cr.AsOwner()
 	for i := range cr.Spec.Zones {
 		name := fmt.Sprintf("vmcluster-%d", i+1)
 		vmCluster := newVMCluster(name, namespace, "v1.0.0", owner)
+		scheme.Default(vmCluster)
 		vmAgent := newVMAgent(name, namespace, owner)
+		scheme.Default(vmAgent)
 		zs.backends = append(zs.backends, vmBackend{obj: vmCluster})
 		zs.vmagents = append(zs.vmagents, vmAgent)
 		vmclusters = append(vmclusters, vmCluster)

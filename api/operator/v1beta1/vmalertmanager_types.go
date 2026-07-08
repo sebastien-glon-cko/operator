@@ -231,7 +231,7 @@ type VMAlertmanagerSpec struct {
 	VPA *EmbeddedVPA `json:"vpa,omitempty"`
 
 	CommonConfigReloaderParams `json:",inline,omitempty"`
-	CommonAppsParams           `json:",inline,omitempty"`
+	CommonAppsParams           `json:",inline"`
 }
 
 // GetReloadURL implements reloadable interface
@@ -405,15 +405,42 @@ func (cr *VMAlertmanager) Port() string {
 	return port
 }
 
-// AsURL returns url for accessing alertmanager
-// via corresponding service
-func (cr *VMAlertmanager) AsURL(isExtra bool) string {
-	portName := cr.Spec.PortName
-	if portName == "" {
-		portName = "web"
+// Params implements urlBuilder-adjacent access: VMAlertmanager already implements
+// AppsParams directly.
+func (cr *VMAlertmanager) Params() AppsParams {
+	return cr
+}
+
+// AsURL returns url for accessing alertmanager via corresponding service
+func (cr *VMAlertmanager) AsURL(nsn NamespacedName) (string, error) {
+	return BuildServiceURL(cr, nsn)
+}
+
+// DefaultPort implements urlBuilder interface: VMAlertmanager has no listeners, so this
+// is simply the resolved Port.
+func (cr *VMAlertmanager) DefaultPort() string {
+	return cr.Port()
+}
+
+// DefaultPortName implements urlBuilder interface: PortName, or "web" when unset.
+func (cr *VMAlertmanager) DefaultPortName() string {
+	if cr.Spec.PortName != "" {
+		return cr.Spec.PortName
 	}
-	svcName, port := ResolveServiceURL(cr.PrefixedName(), cr.Port(), portName, cr.Spec.ServiceSpec, isExtra)
-	return fmt.Sprintf("%s://%s.%s.svc:%s", cr.accessScheme(), svcName, cr.Namespace, port)
+	return "web"
+}
+
+// DefaultScheme implements urlBuilder interface, reflecting WebConfig's TLS state.
+func (cr *VMAlertmanager) DefaultScheme() string {
+	if cr.Spec.WebConfig != nil && cr.Spec.WebConfig.TLSServerConfig != nil {
+		return "https"
+	}
+	return "http"
+}
+
+// GetListener implements urlBuilder interface: VMAlertmanager has no HTTPListeners.
+func (cr *VMAlertmanager) GetListener(string) *HTTPListener {
+	return nil
 }
 
 // returns fqdn for direct pod access
