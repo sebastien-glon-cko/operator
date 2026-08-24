@@ -34,6 +34,7 @@ import (
 	"github.com/VictoriaMetrics/operator/internal/controller/operator/factory/finalize"
 	"github.com/VictoriaMetrics/operator/internal/controller/operator/factory/limiter"
 	"github.com/VictoriaMetrics/operator/internal/controller/operator/factory/logger"
+	"github.com/VictoriaMetrics/operator/internal/controller/operator/factory/reconcile"
 	"github.com/VictoriaMetrics/operator/internal/controller/operator/factory/vmauth"
 )
 
@@ -96,6 +97,10 @@ func (r *VMAuthReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res
 
 	RegisterObjectStat(&instance, r.name)
 	if !instance.DeletionTimestamp.IsZero() {
+		parentObject := fmt.Sprintf("%s.%s.vmauth", instance.Name, instance.Namespace)
+		if err = reconcile.StatusForChildObjects(ctx, r.Client, parentObject, []*vmv1beta1.VMUser(nil)); err != nil {
+			return
+		}
 		if err = finalize.OnVMAuthDelete(ctx, r, &instance); err != nil {
 			err = fmt.Errorf("cannot remove finalizer from vmauth: %w", err)
 		}

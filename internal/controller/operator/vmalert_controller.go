@@ -18,6 +18,7 @@ package operator
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/VictoriaMetrics/operator/internal/controller/operator/factory/finalize"
 	"github.com/VictoriaMetrics/operator/internal/controller/operator/factory/limiter"
 	"github.com/VictoriaMetrics/operator/internal/controller/operator/factory/logger"
+	"github.com/VictoriaMetrics/operator/internal/controller/operator/factory/reconcile"
 	"github.com/VictoriaMetrics/operator/internal/controller/operator/factory/vmalert"
 )
 
@@ -94,6 +96,10 @@ func (r *VMAlertReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 
 	RegisterObjectStat(&instance, r.name)
 	if !instance.DeletionTimestamp.IsZero() {
+		parentObject := fmt.Sprintf("%s.%s.vmalert", instance.Name, instance.Namespace)
+		if err = reconcile.StatusForChildObjects(ctx, r.Client, parentObject, []*vmv1beta1.VMRule(nil)); err != nil {
+			return
+		}
 		err = finalize.OnVMAlertDelete(ctx, r.Client, &instance)
 		return
 	}

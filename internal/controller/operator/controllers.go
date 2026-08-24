@@ -404,3 +404,18 @@ func reconcileAndTrackStatus[T client.Object, ST reconcile.StatusWithMetadata[ST
 	}
 	return result, nil
 }
+
+// releaseScrapeChildStatuses releases parentObject's Applied condition from every
+// VMServiceScrape/VMPodScrape/VMNodeScrape/VMProbe/VMStaticScrape/VMScrapeConfig still
+// carrying it, for use on VMAgent/VMSingle deletion, since no further reconcile of the
+// deleted parent will ever release these otherwise.
+func releaseScrapeChildStatuses(ctx context.Context, rclient client.Client, parentObject string) error {
+	return errors.Join(
+		reconcile.StatusForChildObjects(ctx, rclient, parentObject, []*vmv1beta1.VMServiceScrape(nil)),
+		reconcile.StatusForChildObjects(ctx, rclient, parentObject, []*vmv1beta1.VMPodScrape(nil)),
+		reconcile.StatusForChildObjects(ctx, rclient, parentObject, []*vmv1beta1.VMNodeScrape(nil)),
+		reconcile.StatusForChildObjects(ctx, rclient, parentObject, []*vmv1beta1.VMProbe(nil)),
+		reconcile.StatusForChildObjects(ctx, rclient, parentObject, []*vmv1beta1.VMStaticScrape(nil)),
+		reconcile.StatusForChildObjects(ctx, rclient, parentObject, []*vmv1beta1.VMScrapeConfig(nil)),
+	)
+}

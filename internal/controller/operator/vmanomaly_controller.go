@@ -18,6 +18,7 @@ package operator
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/VictoriaMetrics/operator/internal/controller/operator/factory/finalize"
 	"github.com/VictoriaMetrics/operator/internal/controller/operator/factory/limiter"
 	"github.com/VictoriaMetrics/operator/internal/controller/operator/factory/logger"
+	"github.com/VictoriaMetrics/operator/internal/controller/operator/factory/reconcile"
 	"github.com/VictoriaMetrics/operator/internal/controller/operator/factory/vmanomaly"
 )
 
@@ -95,6 +97,10 @@ func (r *VMAnomalyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	RegisterObjectStat(&instance, r.name)
 	if !instance.DeletionTimestamp.IsZero() {
+		parentObject := fmt.Sprintf("%s.%s.vmanomaly", instance.Name, instance.Namespace)
+		if err = reconcile.StatusForChildObjects(ctx, r.Client, parentObject, []*vmv1.VMAnomalyConfig(nil)); err != nil {
+			return
+		}
 		err = finalize.OnVMAnomalyDelete(ctx, r.Client, &instance)
 		return
 	}
